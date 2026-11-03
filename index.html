@@ -1486,6 +1486,14 @@ body.premium-mode .btn.primary { background:linear-gradient(120deg,#6b65d8,#8c70
             <button type="submit" class="btn primary" id="profileSubmit">Guardar y continuar</button>
           </div>
         </form>
+        <section id="adminProfilePanel" class="panel" style="margin-top:1rem" hidden aria-label="Administración">
+          <h2>Administración de Elige tu camino</h2>
+          <p class="hint">Esta sección solo aparece en el perfil administrador.</p>
+          <div id="adminProfileTools"></div>
+          <div class="actions" style="margin-top:1rem">
+            <a class="btn primary" href="#/premium">Abrir área Premium</a>
+          </div>
+        </section>
       </div>
     </section>
 
@@ -4161,6 +4169,32 @@ function renderPerfil() {
   $$('.field-error').forEach(e => { e.textContent = ''; });
   $$('#profileForm input').forEach(i => i.removeAttribute('aria-invalid'));
   $('#profileCancel').hidden = !state.profile;
+  const adminPanel = $('#adminProfilePanel');
+  if (adminPanel) {
+    const showAdmin = !!state.profile && isPremiumAdmin();
+    adminPanel.hidden = !showAdmin;
+    const tools = $('#adminProfileTools');
+    if (tools) tools.innerHTML = showAdmin ? premiumAdminPanel() : '';
+    if (showAdmin) {
+      const tickAdminProfile = () => {
+        const code = $('#adminPremiumCode'), countdown = $('#adminPremiumCountdown'), recipientCode = $('#adminRecipientCode');
+        if (!code || !countdown) return;
+        const current = currentManualPremiumCode();
+        code.textContent = current;
+        if (recipientCode && !recipientCode.dataset.edited) recipientCode.value = current;
+        const seconds = 300 - Math.floor((Date.now() % 300000) / 1000);
+        countdown.textContent = `Se renueva en ${seconds} segundos.`;
+      };
+      tickAdminProfile();
+      if (window.__adminProfileCodeTimer) clearInterval(window.__adminProfileCodeTimer);
+      window.__adminProfileCodeTimer = setInterval(tickAdminProfile, 1000);
+      const recipientCode = $('#adminRecipientCode');
+      if (recipientCode) recipientCode.addEventListener('input', () => { recipientCode.dataset.edited = 'true'; });
+    } else if (window.__adminProfileCodeTimer) {
+      clearInterval(window.__adminProfileCodeTimer);
+      window.__adminProfileCodeTimer = null;
+    }
+  }
 }
 function validateProfile(f) {
   const errs = {};
@@ -4664,6 +4698,17 @@ const ACTIONS = {
 };
 
 document.addEventListener('click', e => {
+  const adminTabButton = e.target.closest ? e.target.closest('[data-admin-tab]') : null;
+  if (adminTabButton) {
+    if (!isPremiumAdmin()) return;
+    const codes = $('#adminCodesTab'), messages = $('#adminMessagesTab');
+    const showMessages = adminTabButton.dataset.adminTab === 'messages';
+    if (codes) codes.hidden = showMessages;
+    if (messages) messages.hidden = !showMessages;
+    document.querySelectorAll('[data-admin-tab]').forEach(button => button.setAttribute('aria-selected', String(button === adminTabButton)));
+  }
+});
+document.addEventListener('click', e => {
   const premiumTabButton = e.target.closest('[data-premium-tab]');
   if (premiumTabButton) { renderPremium(premiumTabButton.dataset.premiumTab); return; }
   const iaPrompt=e.target.closest('[data-ia-prompt]'); if(iaPrompt){ sendIA(iaPrompt.dataset.iaPrompt); return; }
@@ -4714,6 +4759,28 @@ document.addEventListener('submit', e => {
     const inp = $('#taskInput'), text = inp.value.trim();
     if (!text) { toast('Escribe algo para añadir la tarea.'); return; }
     state.plan.tasks.push({ id: uid(), text, done: false }); save(); inp.value = ''; renderTasks(); inp.focus();
+  } else if (e.target.id === 'adminSendCodeForm') {
+    e.preventDefault();
+    if (!isPremiumAdmin()) { toast('No tienes permiso para usar esta sección.'); return; }
+    const username = $('#adminRecipientUsername').value.trim();
+    const email = $('#adminRecipientEmail').value.trim();
+    const code = $('#adminRecipientCode').value.trim();
+    if (!username || !/^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$/.test(email) || !code) {
+      toast('Comprueba el nombre, el Gmail y el código.');
+      return;
+    }
+    const subject = encodeURIComponent('Tu código Premium - Elige tu camino');
+    const body = encodeURIComponent(`Hola ${username},
+
+Aquí tienes tu código para acceder a Premium en Elige tu camino:
+
+${code}
+
+Introdúcelo en el apartado Premium de la web. Recuerda que el código caduca a los cinco minutos de generarse.
+
+¡Que disfrutes de las herramientas Premium!`);
+    window.location.href = `mailto:${encodeURIComponent(email)}?subject=${subject}&body=${body}`;
+    toast('Se ha preparado el correo. Revísalo y pulsa Enviar en tu aplicación de correo.');
   } else if (e.target.id === 'loginForm') {
     e.preventDefault();
     const username = $('#login-user').value.trim(), email = $('#login-email').value.trim();
@@ -4863,7 +4930,32 @@ function currentManualPremiumCode() {
 function premiumAdminPanel() {
   if (!isPremiumAdmin()) return '';
   const left = 300 - Math.floor((Date.now() % 300000) / 1000);
-  return `<section class="premium-detail" style="margin-top:1rem" aria-label="Administración Premium"><div class="premium-section-head"><div class="premium-section-icon">✉</div><div><h2 style="margin:0">Mensajes y códigos</h2><p class="muted" style="margin:0">Panel privado de administración</p></div></div><p>Las solicitudes llegan a tu correo. Revisa el mensaje, decide si aceptas y comparte el código vigente con esa persona.</p><div class="premium-gate-inline"><p class="muted">Código vigente para esta ventana de 5 minutos</p><div id="adminPremiumCode" style="font-size:2rem;font-weight:900;letter-spacing:.22em;text-align:center">${currentManualPremiumCode()}</div><p class="hint" id="adminPremiumCountdown">Se renueva en ${left} segundos.</p><button type="button" class="btn secondary" data-action="copyPremiumCode">Copiar código</button><p class="hint">El código se calcula localmente en cada navegador. No es un sistema seguro: alguien con conocimientos técnicos podría descubrir cómo se genera.</p></div><a class="btn primary" style="display:inline-flex;margin-top:.8rem;text-decoration:none" href="mailto:maelcarber@gmail.com?subject=Solicitud%20Premium%20-%20Elige%20tu%20camino">Abrir correo de solicitudes</a></section>`;
+  return `<section class="premium-detail" style="margin-top:1rem" aria-label="Administración Premium">
+    <div class="premium-section-head"><div class="premium-section-icon">✉</div><div><h2 style="margin:0">Administración</h2><p class="muted" style="margin:0">Solo visible en el perfil administrador</p></div></div>
+    <div class="btn-row" style="margin:.8rem 0" role="tablist" aria-label="Herramientas de administración">
+      <button type="button" class="btn secondary" data-admin-tab="codes" aria-selected="true">Administración de códigos</button>
+      <button type="button" class="btn secondary" data-admin-tab="messages" aria-selected="false">Mensajes</button>
+    </div>
+    <section id="adminCodesTab" class="premium-gate-inline" role="tabpanel">
+      <h3 style="margin-top:0">Código Premium vigente</h3>
+      <p class="muted">Este código cambia cada cinco minutos.</p>
+      <div id="adminPremiumCode" style="font-size:2rem;font-weight:900;letter-spacing:.22em;text-align:center">${currentManualPremiumCode()}</div>
+      <p class="hint" id="adminPremiumCountdown">Se renueva en ${left} segundos.</p>
+      <button type="button" class="btn secondary" data-action="copyPremiumCode">Copiar código</button>
+      <p class="hint">El código se genera en el navegador y no tiene validación segura en un servidor.</p>
+    </section>
+    <section id="adminMessagesTab" class="premium-gate-inline" role="tabpanel" hidden>
+      <h3 style="margin-top:0">Enviar código a un usuario</h3>
+      <p class="muted">Escribe los datos de la persona que solicitó Premium. Se abrirá un correo dirigido a su Gmail.</p>
+      <form id="adminSendCodeForm" class="premium-form" autocomplete="off">
+        <div class="field"><label for="adminRecipientUsername">Nombre de usuario</label><input id="adminRecipientUsername" name="recipientUsername" type="text" maxlength="60" required placeholder="Nombre de usuario"></div>
+        <div class="field"><label for="adminRecipientEmail">Gmail del usuario</label><input id="adminRecipientEmail" name="recipientEmail" type="email" required placeholder="persona@gmail.com"></div>
+        <div class="field"><label for="adminRecipientCode">Código Premium que vas a enviar</label><input id="adminRecipientCode" name="recipientCode" type="text" maxlength="12" required value="${currentManualPremiumCode()}" placeholder="Código de acceso"></div>
+        <p class="hint">Comprueba que el correo y el código sean correctos antes de enviar.</p>
+        <div class="actions"><button type="submit" class="btn primary">Preparar correo para enviar</button></div>
+      </form>
+    </section>
+  </section>`;
 }
 function premiumGateForm() {
   if (state.premiumUnlocked) return `<div class="premium-gate-inline"><h3 style="margin-top:0">✦ Acceso Premium activo</h3><p class="muted">Ya puedes explorar las herramientas Premium.</p><button type="button" class="btn primary" data-premium-tab="iastudio">Abrir IAstudio Ultra →</button></div>`;
